@@ -1,0 +1,129 @@
+#calculate clusters for Th17 
+library(ggplot2) 
+library(reshape2)
+library(mixtools)
+library(dplyr)
+library(ggrepel)
+library(ggpubr)
+library(mclust)
+library(cowplot)
+library(colormap)
+library(tidyr)
+library(scales)
+library(lme4)
+library(coefplot2)
+library(lubridate)
+
+cols <- colormap(colormap=colormaps$rainbow, nshades=14)
+
+#load("~/Dropbox/Weinstock Lab/ZXE/ZXE10/HMP_MultiOmics.RData")
+load("~/Desktop/Revision_MultiOmes_0509.RData")
+
+OTU <- read.csv("~/Dropbox/HMP2 paper/Original Data/matrix_stool_16s_11282017/samples_labelled_by_hostsampelid/stool_16s_otus_hostsampleid.tsv", header = T, row.names = 1,sep="\t")
+OTUck <- merge(OTU, ck.df, by.x = "row.names", by.y = "SampleID")
+jaxtime <- read.csv("~/Dropbox/Weinstock Lab/ZXE/ZXE10/result_table_Xin/Result table/hmp2_infection_metadata_Xin.csv", header = T, row.names = 1)
+OGTT <- read.csv("~/Desktop/datamatrix_0425/OGTT.csv", header = T, row.names = 1)
+#metastf <- read.csv("~/Dropbox/HMP2 paper/Original Data/HMPmetadata_2018Jan09.csv", row.names = 1, header = T)
+
+row.names(ck.df) <- gsub("69-028-", "70-1014-",row.names(ck.df))
+row.names(ck.df) <- gsub("69-105-", "69-106-",row.names(ck.df))
+
+#plot cytokine background
+#pdf("~/Desktop/DensityplotforCHEX.pdf")
+ck.df %>% 
+  gather(CHEX1, CHEX2, CHEX3, CHEX4, key="var", value="value") %>%
+  ggplot(aes(x=value)) + geom_histogram(bins=50) + facet_wrap(~var, scales = "free") 
+
+max1 <- mean(ck.df$CHEX1) + 5 * sqrt(var(ck.df$CHEX1))
+min1 <- mean(ck.df$CHEX1) - 5 * sqrt(var(ck.df$CHEX1))
+pc1 <- ggplot(ck.df, aes(x=CHEX1)) + geom_histogram(bins=50) + geom_vline(xintercept=c(min1, max1),linetype=3)
+#pc4 <- pc4 + geom_density(aes(y=..density..*150),color = "red",linetype ="dotted",size = 1.5)
+pc1
+max2 <- mean(ck.df$CHEX2) + 5 * sqrt(var(ck.df$CHEX2))
+min2 <- mean(ck.df$CHEX2) - 5 * sqrt(var(ck.df$CHEX2))
+pc2 <- ggplot(ck.df, aes(x=CHEX2)) + geom_histogram(bins=50) + geom_vline(xintercept=c(min2, max2),linetype=3)
+#pc4 <- pc4 + geom_density(aes(y=..density..*150),color = "red",linetype ="dotted",size = 1.5)
+pc2
+max3 <- mean(ck.df$CHEX3) + 5 * sqrt(var(ck.df$CHEX3))
+min3 <- mean(ck.df$CHEX3) - 5 * sqrt(var(ck.df$CHEX3))
+pc3 <- ggplot(ck.df, aes(x=CHEX3)) + geom_histogram(bins=50) + geom_vline(xintercept=c(min3, max3),linetype=3)
+#pc4 <- pc4 + geom_density(aes(y=..density..*150),color = "red",linetype ="dotted",size = 1.5)
+pc3
+max4 <- mean(ck.df$CHEX4) + 5 * sqrt(var(ck.df$CHEX4))
+min4 <- mean(ck.df$CHEX4) - 5 * sqrt(var(ck.df$CHEX4))
+pc4 <- ggplot(ck.df, aes(x=CHEX4)) + geom_histogram(bins=50) + geom_vline(xintercept=c(min4, max4),linetype=3)
+#pc4 <- pc4 + geom_density(aes(y=..density..*150),color = "red",linetype ="dotted",size = 1.5)
+pc4
+
+#pdf("~/Desktop/DensityplotforCHEX_withSD.pdf")
+ggarrange(pc1,pc2,pc3,pc4, ncol = 2, nrow =2)
+dev.off()
+rm(pc1,pc2,pc3,pc4)
+
+ck.df0 <- subset(ck.df, CHEX1 < max1 & CHEX1 > min1 
+                & CHEX2 < max2 & CHEX2 > min2
+                & CHEX3 < max3 & CHEX3 > min3
+                & CHEX4 < max4 & CHEX4 > min4)
+setdiff(ck.df$SampleID,ck.df0$SampleID)
+ck.df <- ck.df0
+rm(max1, max2, max3, max4, min1, min2, min3, min4)
+
+#get cytokine geommean for 965 samples
+op.df <- ck.df[,4:70]
+peoplelist <- unique(op.df[,"SubjectID"])
+gm_mean = function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
+z1 <- data.frame()
+for (j in 1:length(peoplelist)){
+  i <- peoplelist[j]
+  print(i)
+  x <- subset(op.df, SubjectID==i)
+  y <- x[,1:66]
+  y1 <- round(y,digits=3)
+  y2 <- lapply(y1, gm_mean)
+  z <- as.data.frame(y2)
+  z1 <- rbind(z,z1)
+}
+row.names(z1) <- rev(peoplelist)
+rm(i,j,x,y,y1,y2,z)
+
+#plot background outlayers
+#plot(z1$CHEX1, pch="*", cex=2, main="iHMP Subject cytokine (geom-mean) levels")  # plot cook's distance
+#abline(h = 4*mean(z1$CHEX1, na.rm=T), col="red") 
+#text(x=1:row_number(z1$CHEX1)+30, y=z1$CHEX1, labels= ifelse(IL1722$IL17F >4*mean(IL1722$IL17F, na.rm=T), rownames(IL1722),""), col="red")
+
+#get variance for cytokine 
+xy <- aggregate(op.df, by = list(op.df$SubjectID),FUN=var)
+z2 <- table(ck.df$SubjectID)
+z2 <- as.data.frame(z2)
+var0 <- merge(z2, xy, by.x = "Var1", by.y <- "Group.1")
+row.names(var0) <- var0$Var1
+rm(xy,z2)
+
+fr.su <- as.data.frame(table(ck.df$SubjectID))
+fr.su5 <- subset(fr.su, Freq >= 5)
+
+meanck69 <- merge(fr.su5, z1, by.x = "Var1", by.y = "row.names")
+row.names(meanck69) <- meanck69$Var1
+
+var69 <- merge(fr.su5, var0, by.x = "Var1", by.y = "Var1")
+row.names(var69) <- var69$Var1
+
+IL1722 <- meanck69[,c("IL17A", "IL17F", "IL22")]
+IL1722var <- var69[,c("IL17A", "IL17F", "IL22")]
+colnames(IL1722var) <- c("IL17A_V","IL17F_V", "IL22_V")
+
+test <- read.table("~/Desktop/test.txt", sep="\t", header=T)
+Mclust(scale(test))
+
+
+df.D <- cbind(IL1722,sqrt(IL1722var))
+
+df.Ds <- as.data.frame(scale(df.D))
+
+
+faithfulmclust <- Mclust(df.Ds, G = 3)
+summary(faithfulmclust, parameters = T)
+BIC <- mclustBIC(df.Ds)
+summary(BIC)
